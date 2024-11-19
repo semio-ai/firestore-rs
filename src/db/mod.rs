@@ -36,6 +36,8 @@ pub use listen_changes_state_storage::*;
 use crate::*;
 use gcloud_sdk::google::firestore::v1::firestore_client::FirestoreClient;
 use gcloud_sdk::google::firestore::v1::*;
+pub use gcloud_sdk::{ExternalJwtFunctionSource, SecretValue, Token, TokenSourceType};
+
 use gcloud_sdk::*;
 use serde::{Deserialize, Serialize};
 use tracing::*;
