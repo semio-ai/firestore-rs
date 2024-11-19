@@ -49,6 +49,8 @@ pub use listen_changes_state_storage::*;
 use crate::*;
 use gcloud_sdk::google::firestore::v1::firestore_client::FirestoreClient;
 use gcloud_sdk::google::firestore::v1::*;
+pub use gcloud_sdk::{ExternalJwtFunctionSource, SecretValue, Token, TokenSourceType};
+
 use gcloud_sdk::*;
 // Re-export serde for convenience as it's often used with Firestore documents.
 use serde::{Deserialize, Serialize};
