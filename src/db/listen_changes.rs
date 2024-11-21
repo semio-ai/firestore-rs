@@ -4,11 +4,13 @@ use crate::timestamp_utils::to_timestamp;
 use crate::{FirestoreDb, FirestoreQueryParams, FirestoreResult, FirestoreResumeStateStorage};
 pub use async_trait::async_trait;
 use chrono::prelude::*;
+use futures::lock::Mutex;
 use futures::stream::BoxStream;
-use futures::StreamExt;
 use futures::TryFutureExt;
 use futures::TryStreamExt;
+use futures::StreamExt;
 use gcloud_sdk::google::firestore::v1::*;
+use listen_response::ResponseType;
 use rsb_derive::*;
 pub use rvstruct::ValueStruct;
 use std::collections::HashMap;
@@ -252,6 +254,8 @@ where
     shutdown_writer: Option<Arc<UnboundedSender<i8>>>,
 }
 
+pub type FirestoreListenerStream<'a> = BoxStream<'a, FirestoreResult<ResponseType>>;
+
 impl<D, S> FirestoreListener<D, S>
 where
     D: FirestoreListenSupport + Clone + Send + Sync + 'static,
@@ -282,16 +286,9 @@ where
         Ok(())
     }
 
-    pub async fn start<FN, F>(&mut self, cb: FN) -> FirestoreResult<()>
-    where
-        FN: Fn(FirestoreListenEvent) -> F + Send + Sync + 'static,
-        F: Future<Output = AnyBoxedErrResult<()>> + Send + 'static,
-    {
-        info!(
-            num_targets = self.targets.len(),
-            "Starting a Firestore listener for targets...",
-        );
-
+    async fn init_target_states(
+        &self,
+    ) -> FirestoreResult<HashMap<FirestoreListenerTarget, FirestoreListenerTargetParams>> {
         let mut initial_states: HashMap<FirestoreListenerTarget, FirestoreListenerTargetParams> =
             HashMap::new();
         for target_params in &self.targets {
@@ -323,9 +320,28 @@ where
 
         if initial_states.is_empty() {
             warn!("No initial states for listener targets. Exiting...");
-            return Ok(());
+            return Err(FirestoreError::InvalidParametersError(
+                FirestoreInvalidParametersError::new(FirestoreInvalidParametersPublicDetails::new(
+                    "targets".to_string(),
+                    "No initial states found for listener targets".to_string(),
+                )),
+            ));
         }
 
+        Ok(initial_states)
+    }
+
+    pub async fn start<FN, F>(&mut self, cb: FN) -> FirestoreResult<()>
+    where
+        FN: Fn(FirestoreListenEvent) -> F + Send + Sync + 'static,
+        F: Future<Output = AnyBoxedErrResult<()>> + Send + 'static,
+    {
+        info!(
+            num_targets = self.targets.len(),
+            "Starting a Firestore listener for targets...",
+        );
+
+        let initial_states = self.init_target_states().await?;
         let (tx, rx): (UnboundedSender<i8>, UnboundedReceiver<i8>) =
             tokio::sync::mpsc::unbounded_channel();
 
@@ -490,5 +506,64 @@ where
                 false
             }
         }
+    }
+
+    pub async fn into_stream<'a>(self) -> FirestoreResult<FirestoreListenerStream<'a>> {
+        let initial_states = Arc::new(Mutex::new(self.init_target_states().await?));
+        let storage = Arc::new(self.storage);
+        let adapted_stream = self.db
+            .listen_doc_changes(self.targets)
+            .await?
+            .filter_map(move |event: FirestoreResult<ListenResponse>| {
+                let initial_states = initial_states.clone();
+                let storage = storage.clone();
+                async move {
+                    match event{
+                        Ok(event) => {
+                            trace!(?event, "Received a listen response event to handle.");
+
+                            match event.response_type {
+                                Some(listen_response::ResponseType::TargetChange(ref target_change))
+                                    if !target_change.resume_token.is_empty() =>
+                                {
+                                    for target_id_num in &target_change.target_ids {
+                                        match FirestoreListenerTarget::try_from(*target_id_num) {
+                                            Ok(target_id) => {
+                                                if let Some(target) = initial_states.lock().await.get_mut(&target_id) {
+                                                    let new_token: FirestoreListenerToken = target_change.resume_token.clone().into();
+
+                                                    if let Err(err) = storage.update_resume_token(&target.target, new_token.clone()).await {
+                                                        error!(%err, "Listener token storage error occurred.");
+                                                        return Some(Err(FirestoreError::InvalidParametersError(
+                                                            FirestoreInvalidParametersError::new(FirestoreInvalidParametersPublicDetails::new(
+                                                                "storage".to_string(),
+                                                                "Failed to store the listener token".to_string(),
+                                                            )),
+                                                        )));
+                                                    }
+                                                    else {
+                                                        target.resume_type = Some(FirestoreListenerTargetResumeType::Token(new_token))
+                                                    }
+                                                }
+                                            },
+                                            Err(err) => {
+                                                error!(%err, target_id_num, "Listener system error - unexpected target ID.");
+                                                return Some(Err(err))
+                                            }
+                                        }
+                                    }
+                                    None
+                                }
+                                Some(response_type) => Some(Ok(response_type)),
+                                None  =>  None,
+                            }
+                        }
+                        Err(err) => Some(Err(err)),
+                    }
+                }
+            });
+
+        Ok(adapted_stream.boxed())
+        // make it clear that that if a try_next() returns None, the stream is done
     }
 }
