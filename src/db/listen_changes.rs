@@ -6,9 +6,9 @@ pub use async_trait::async_trait;
 use chrono::prelude::*;
 use futures::lock::Mutex;
 use futures::stream::BoxStream;
+use futures::StreamExt;
 use futures::TryFutureExt;
 use futures::TryStreamExt;
-use futures::StreamExt;
 use gcloud_sdk::google::firestore::v1::*;
 use listen_response::ResponseType;
 use rsb_derive::*;
@@ -86,6 +86,11 @@ impl FirestoreListenSupport for FirestoreDb {
     }
 }
 
+/**
+ * Entity identifying a listener.
+ * Though it is meant to be an unsigned,
+ * it cannot be larger than i32::MAX (or u32::MAX / 2).
+ */
 #[derive(Clone, Debug, Eq, PartialEq, Hash, ValueStruct)]
 pub struct FirestoreListenerTarget(u32);
 
