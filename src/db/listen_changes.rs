@@ -523,32 +523,33 @@ where
                             trace!(?event, "Received a listen response event to handle.");
 
                             match event.response_type {
-                                Some(listen_response::ResponseType::TargetChange(ref target_change))
-                                    if !target_change.resume_token.is_empty() =>
+                                Some(listen_response::ResponseType::TargetChange(ref target_change)) =>
                                 {
-                                    for target_id_num in &target_change.target_ids {
-                                        match FirestoreListenerTarget::try_from(*target_id_num) {
-                                            Ok(target_id) => {
-                                                if let Some(target) = initial_states.lock().await.get_mut(&target_id) {
-                                                    let new_token: FirestoreListenerToken = target_change.resume_token.clone().into();
+                                    if !target_change.resume_token.is_empty() {
+                                        for target_id_num in &target_change.target_ids {
+                                            match FirestoreListenerTarget::try_from(*target_id_num) {
+                                                Ok(target_id) => {
+                                                    if let Some(target) = initial_states.lock().await.get_mut(&target_id) {
+                                                        let new_token: FirestoreListenerToken = target_change.resume_token.clone().into();
 
-                                                    if let Err(err) = storage.update_resume_token(&target.target, new_token.clone()).await {
-                                                        error!(%err, "Listener token storage error occurred.");
-                                                        return Some(Err(FirestoreError::InvalidParametersError(
-                                                            FirestoreInvalidParametersError::new(FirestoreInvalidParametersPublicDetails::new(
-                                                                "storage".to_string(),
-                                                                "Failed to store the listener token".to_string(),
-                                                            )),
-                                                        )));
+                                                        if let Err(err) = storage.update_resume_token(&target.target, new_token.clone()).await {
+                                                            error!(%err, "Listener token storage error occurred.");
+                                                            return Some(Err(FirestoreError::InvalidParametersError(
+                                                                FirestoreInvalidParametersError::new(FirestoreInvalidParametersPublicDetails::new(
+                                                                    "storage".to_string(),
+                                                                    "Failed to store the listener token".to_string(),
+                                                                )),
+                                                            )));
+                                                        }
+                                                        else {
+                                                            target.resume_type = Some(FirestoreListenerTargetResumeType::Token(new_token))
+                                                        }
                                                     }
-                                                    else {
-                                                        target.resume_type = Some(FirestoreListenerTargetResumeType::Token(new_token))
-                                                    }
+                                                },
+                                                Err(err) => {
+                                                    error!(%err, target_id_num, "Listener system error - unexpected target ID.");
+                                                    return Some(Err(err))
                                                 }
-                                            },
-                                            Err(err) => {
-                                                error!(%err, target_id_num, "Listener system error - unexpected target ID.");
-                                                return Some(Err(err))
                                             }
                                         }
                                     }
