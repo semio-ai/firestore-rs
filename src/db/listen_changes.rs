@@ -406,7 +406,7 @@ where
                 .await
             {
                 Err(err) => {
-                    if Self::check_listener_if_permanent_error(err, effective_delay).await {
+                    if Self::check_listener_if_permanent_error(&err, effective_delay).await {
                         shutdown_flag.store(true, Ordering::Relaxed);
                     }
                 }
@@ -468,7 +468,7 @@ where
                                     }
                                     Ok(None) => break,
                                     Err(err) => {
-                                        if Self::check_listener_if_permanent_error(err, effective_delay).await {
+                                        if Self::check_listener_if_permanent_error(&err, effective_delay).await {
                                             shutdown_flag.store(true, Ordering::Relaxed);
                                         }
                                         break;
@@ -483,7 +483,7 @@ where
     }
 
     async fn check_listener_if_permanent_error(
-        err: FirestoreError,
+        err: &FirestoreError,
         delay: std::time::Duration,
     ) -> bool {
         match err {
@@ -516,6 +516,8 @@ where
     pub async fn into_stream<'a>(self) -> FirestoreResult<FirestoreListenerStream<'a>> {
         let initial_states = Arc::new(Mutex::new(self.init_target_states().await?));
         let storage = Arc::new(self.storage);
+
+        let effective_delay = std::time::Duration::from_secs(5);
         let adapted_stream = self.db
             .listen_doc_changes(self.targets)
             .await?
@@ -564,7 +566,13 @@ where
                                 None  =>  None,
                             }
                         }
-                        Err(err) => Some(Err(err)),
+                        Err(err) => {
+                            if Self::check_listener_if_permanent_error(&err, effective_delay).await {
+                                Some(Err(err))
+                            } else {
+                                None
+                            }
+                        },
                     }
                 }
             });
