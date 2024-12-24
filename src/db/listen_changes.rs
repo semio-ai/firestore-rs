@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+pub use target_change::TargetChangeType;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tracing::*;
@@ -530,7 +531,7 @@ where
                             trace!(?event, "Received a listen response event to handle.");
 
                             match event.response_type {
-                                Some(listen_response::ResponseType::TargetChange(ref target_change)) =>
+                                Some(ResponseType::TargetChange(ref target_change)) =>
                                 {
                                     if !target_change.resume_token.is_empty() {
                                         for target_id_num in &target_change.target_ids {
@@ -559,6 +560,10 @@ where
                                                 }
                                             }
                                         }
+                                    }
+                                    // "Consistent snapshot was reached", whatever that means
+                                    if target_change.target_change_type() == TargetChangeType::Current {
+                                        return Some(Ok(ResponseType::TargetChange(target_change.clone())));
                                     }
                                     None
                                 }
