@@ -561,7 +561,7 @@ where
                                             }
                                         }
                                     }
-                                    // "Consistent snapshot was reached", whatever that means
+                                    // Consistent snapshot was reached. The next events will be about next snapshot.
                                     if target_change.target_change_type() == TargetChangeType::Current {
                                         return Some(Ok(ResponseType::TargetChange(target_change.clone())));
                                     }
