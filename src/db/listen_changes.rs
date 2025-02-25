@@ -565,6 +565,12 @@ where
                                     if target_change.target_change_type() == TargetChangeType::Current {
                                         return Some(Ok(ResponseType::TargetChange(target_change.clone())));
                                     }
+                                    if target_change.target_change_type() == TargetChangeType::Remove {
+                                        return Some(Err(FirestoreError::SystemError(FirestoreSystemError::new(
+                                            FirestoreErrorPublicGenericDetails::new("SystemError".into()),
+                                            format!("Listener target was removed, cause: {:?}", target_change.cause),
+                                        ))));
+                                    }
                                     None
                                 }
                                 Some(response_type) => Some(Ok(response_type)),
